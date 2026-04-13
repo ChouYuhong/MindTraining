@@ -30,6 +30,7 @@ from .data_collator import (
     UnpackDataCollator,
 )
 from .dynamic_batching import DynamicBatchingSizeDataset, DynamicBatchSizeDataLoader, TextBatchingStrategy
+from .shuffle_packing_dataset import ShufflePackingDataset
 
 
 DATALOADER_REGISTRY = Registry("dataloader")
@@ -62,9 +63,10 @@ def build_native_dataloader(
     bsz_warmup_ratio: float = 0.02,
     bsz_warmup_init_mbtoken: int = 200,
     dyn_bsz: bool = True,
-    dyn_bsz_in_dataloader: bool = True,  # If True, dynamic batching is handled in the main process via DynamicBatchSizeDataLoader (legacy).
+    use_shuffle_packing: bool = True,
+    dyn_bsz_in_dataloader: bool = False,  # If True, dynamic batching is handled in the main process via DynamicBatchSizeDataLoader (legacy).
     # If False, batching is done inside each DataLoader worker via DynamicBatchingSizeDataset, which supports StatefulDataLoader checkpoint/resume.
-    dyn_bsz_dataset_save_by_idx: bool = True,  # Whether to save buffer by index for checkpointing when dyn_bsz_in_dataloader is False.
+    dyn_bsz_dataset_save_by_idx: bool = False,  # Whether to save buffer by index for checkpointing when dyn_bsz_in_dataloader is False.
     dyn_bsz_buffer_size: int = 500,
     num_workers: int = 8,
     drop_last: bool = True,
@@ -87,7 +89,27 @@ def build_native_dataloader(
         micro_batch_size * parallel_state.dp_size
     )  # num_micro_batch = num accumulation steps
 
-    if dyn_bsz:
+    if use_shuffle_packing:
+        logger.info_rank0(
+            f"Use shuffle_packing -->\n"
+            f"micro_batch_size: {micro_batch_size}, max_seq_len: {max_seq_len}, "
+            f"buffer_size: {dyn_bsz_buffer_size}."
+        )
+        dataloader_batch_size = num_micro_batch
+        dataset = ShufflePackingDataset(
+            dataset=dataset,
+            max_seq_len=max_seq_len,
+            micro_batch_size=micro_batch_size,
+            buffer_size=dyn_bsz_buffer_size, # Reuse this config for shuffle buffer size
+            collate_fn=collate_fn, # Use the MainCollator to convert List[Dict] to Dict[Tensor]
+            seed=seed,
+            get_length_fn=lambda x: int(x["attention_mask"].sum()) if "attention_mask" in x else len(x["input_ids"]),
+        )
+        # Because ShufflePackingDataset already yields a fully collated MicroBatch (Dict[Tensor]),
+        # we set the DataLoader's collate_fn to NoopDataCollator so it just passes it through.
+        collate_fn = NoopDataCollator()
+
+    elif dyn_bsz:
         batching_token_len = micro_batch_size * max_seq_len
         bsz_warmup_steps = int(train_steps * bsz_warmup_ratio)
 

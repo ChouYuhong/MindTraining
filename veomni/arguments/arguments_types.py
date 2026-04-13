@@ -318,6 +318,10 @@ class TrainingArguments:
         default=True,
         metadata={"help": "Enable dynamic batch size for padding-free training."},
     )
+    use_shuffle_packing: bool = field(
+        default=False,
+        metadata={"help": "Enable exact-length shuffle packing dataset. Usually used for continuous pretraining."},
+    )
     micro_batch_size: int = field(
         default=1,
         metadata={"help": "Micro batch size. The number of samples per iteration on each device."},
