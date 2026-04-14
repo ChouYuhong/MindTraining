@@ -792,7 +792,7 @@ class DataloaderConfig:
         metadata={"help": "Type of the dataloader."},
     )
     num_workers: int = field(
-        default=2,
+        default=1,
         metadata={"help": "Number of workers to load data."},
     )
     worker_num_threads: Optional[int] = field(
@@ -800,7 +800,7 @@ class DataloaderConfig:
         metadata={"help": "Per-worker torch thread count for dataloader subprocesses."},
     )
     prefetch_factor: int = field(
-        default=2,
+        default=64,
         metadata={"help": "Number of batches loaded in advance by each worker."},
     )
     drop_last: bool = field(
