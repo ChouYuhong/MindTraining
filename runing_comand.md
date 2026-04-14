@@ -1,0 +1,1 @@
+bash train.sh tasks/train_text.py --config configs/text/ultra_train.yaml

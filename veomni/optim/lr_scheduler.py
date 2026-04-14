@@ -14,7 +14,7 @@
 
 
 import math
-from typing import TYPE_CHECKING, Dict, Literal
+from typing import TYPE_CHECKING, Dict, Literal, Optional
 
 from torch.optim.lr_scheduler import LambdaLR
 

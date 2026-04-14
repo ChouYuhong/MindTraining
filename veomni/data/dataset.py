@@ -530,27 +530,28 @@ class WeightedMultiSourceDataset(IterableDataset):
             try:
                 return next(self._iters[ds_idx])
             except StopIteration:
-                if self._stopping_strategy == "first_exhausted":
-                    raise
-                if self._stopping_strategy == "all_exhausted":
-                    self._exhausted[ds_idx] = True
-                    if all(self._exhausted):
-                        raise
-                elif self._stopping_strategy == "never_exhausted":
-                    self._exhausted[ds_idx] = True
-                    if all(self._exhausted):
-                        self._exhausted = [False for _ in range(self._ds_num)]
-                logger.warning(
-                    f"Data source #{ds_idx} (source_name: {self._source_names[ds_idx]}) is exhausted, reset and continue"
-                )
-                self._iters[ds_idx] = iter(self._datasets[ds_idx])
-                try:
-                    return next(self._iters[ds_idx])
-                except StopIteration as e:
-                    raise RuntimeError(
-                        f"Data source #{ds_idx} (source_name: {self._source_names[ds_idx]}) remains exhausted "
-                        "immediately after reset"
-                    ) from e
+                raise
+                # if self._stopping_strategy == "first_exhausted":
+                #     raise
+                # if self._stopping_strategy == "all_exhausted":
+                #     self._exhausted[ds_idx] = True
+                #     if all(self._exhausted):
+                #         raise
+                # elif self._stopping_strategy == "never_exhausted":
+                #     self._exhausted[ds_idx] = True
+                #     if all(self._exhausted):
+                #         self._exhausted = [False for _ in range(self._ds_num)]
+                # logger.warning(
+                #     f"Data source #{ds_idx} (source_name: {self._source_names[ds_idx]}) is exhausted, reset and continue"
+                # )
+                # self._iters[ds_idx] = iter(self._datasets[ds_idx])
+                # try:
+                #     return next(self._iters[ds_idx])
+                # except StopIteration as e:
+                #     raise RuntimeError(
+                #         f"Data source #{ds_idx} (source_name: {self._source_names[ds_idx]}) remains exhausted "
+                #         "immediately after reset"
+                #     ) from e
 
     def _attach_meta(self, sample: Any, ds_idx: int) -> Any:
         """Attach per-source metadata fields onto a sample.
@@ -782,6 +783,7 @@ class ShufflePackingDataset(IterableDataset):
                     while len(self._buffer) < self.buffer_size:
                         try:
                             next_item = next(self._data_iter)
+                            next_item = next_item[0]
                             self._buffer.append(next_item)
                         except StopIteration:
                             break
@@ -853,7 +855,7 @@ class ShufflePackingDataset(IterableDataset):
                 part2[k] = v
         return part1, part2
 
-    def _merge_fragments(self, fragments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _merge_fragments(self, fragments: List[Dict[str, Any]], IGNORE_INDEX=-100) -> Dict[str, Any]:
         """Merges multiple fragments into a single sample and handles boundary IGNORE_INDEX."""
         if len(fragments) == 1:
             return fragments[0]

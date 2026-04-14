@@ -183,7 +183,7 @@ def build_native_dataloader(
                 micro_batch_size=micro_batch_size,
                 buffer_size=dyn_bsz_buffer_size,
                 collate_fn=dyn_bsz_collate_fn,
-                seed=getattr(args.train, "seed", 42) if hasattr(args, "train") else 42,
+                seed=seed,
                 get_length_fn=get_length_by_attention_mask_fn,
             )
             collate_fn = NoopDataCollator()
