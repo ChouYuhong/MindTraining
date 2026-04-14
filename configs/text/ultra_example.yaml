@@ -1,0 +1,105 @@
+model:
+  # -------------------------
+  # Model Architecture & Init
+  # -------------------------
+  model_path: "path/to/your/initial/model"      # Path to pre-trained weights (or None for random init)
+  config_path: "path/to/your/model/config"      # Path to model config.json (defaults to model_path)
+  tokenizer_path: "path/to/your/tokenizer"      # Path to tokenizer (defaults to config_path)
+  basic_modules: []                             # Modules not to split in FSDP (e.g., ["Qwen2DecoderLayer"])
+  
+  ops_implementation:
+    attn_implementation: "flash_attention_2"    # [eager, sdpa, flash_attention_2, flash_attention_3]
+    moe_implementation: "eager"                 # [eager, fused, fused_quack]
+
+data:
+  # -------------------------
+  # Dataset Configuration
+  # -------------------------
+  train_path: "path/to/your/data.jsonl"         # Or a .yaml file for multisource interleave
+  eval_path: null                               # Path to eval data (optional)
+  
+  data_type: "plaintext"                        # [plaintext, conversation, diffusion, classification]
+  datasets_type: "iterable"                     # [iterable, mapping] - Must be iterable for shuffle packing!
+  multisource_datasets_type: "interleave"       # Used if train_path is a .yaml, degrade to single source if only one source
+  
+  text_keys: "text"                             # The JSON key containing the text (e.g., "text", "content")
+  max_seq_len: 8192                             # The exact length each packed sample will be cut/padded to
+  dyn_bsz_buffer_size: 1000                     # Buffer size for local shuffle pooling (how many docs to hold)
+  
+  dataloader:
+    num_workers: 4                              # Number of dataloader processes
+    prefetch_factor: 2                          # How many batches to prefetch per worker
+    drop_last: true                             # Must be true for distributed pretraining
+    pin_memory: true
+
+train:
+  # -------------------------
+  # Global Training Setup
+  # -------------------------
+  train_architecture: "full"                    # [full, lora]
+  max_steps: 50_000                             # -> OUR NEW FEATURE <- Direct absolute control of train length!
+  
+  # -------------------------
+  # Batching & Packing Strategy
+  # -------------------------
+  dyn_bsz: false                                # Disable greedy dynamic batching
+  use_shuffle_packing: true                     # -> OUR NEW FEATURE <- Enable exact-length shuffle packing
+  micro_batch_size: 4                           # Micro batch size per device (e.g., 4 * 4096 tokens per step)
+  global_batch_size: 128                        # Global batch size (across all GPUs and accumulation steps)
+  
+  enable_mixed_precision: true                  # Use BF16/FP16
+  init_device: "meta"                           # [cpu, cuda, meta] - How to load model weights initially
+  broadcast_model_weights_from_rank0: true      # Fast loading strategy for large clusters
+  
+  # -------------------------
+  # Optimizer & Scheduler
+  # -------------------------
+  optimizer:
+    type: "adamw"                               # [adam, adamw, any custom optim]
+    lr: 2.0e-5                                  # Peak learning rate
+    lr_min: 1.0e-6                              # Minimum learning rate after decay
+    lr_start: 0.0                               # Starting learning rate for warmup
+    lr_warmup_ratio: 0.02                       # 2% of max_steps for warmup
+    lr_decay_style: "cosine"                    # [constant, linear, cosine]
+    lr_decay_ratio: 1.0                         # Decay over 100% of max_steps
+    weight_decay: 0.1                           # L2 regularization
+    max_grad_norm: 1.0                          # Gradient clipping threshold
+    no_decay_modules: ["RMSNorm", "LayerNorm"]  # Do not apply weight decay to these modules
+    no_decay_params: ["bias"]                   # Do not apply weight decay to biases
+    
+  # -------------------------
+  # Distributed & Parallelism
+  # -------------------------
+  gradient_checkpointing:
+    enable: true                                # Save memory by recomputing activations
+    enable_reentrant: false                     # Usually false for FSDP
+    
+  accelerator:
+    type: "fsdp2"                               # [fsdp, fsdp2, ddp]
+    dp_size: 8                                  # Data parallel degree (number of GPUs)
+    sp_size: 1                                  # Sequence parallel degree (Ulysses)
+    sp_pad_scale: 1
+    cp_size: 1                                  # Context parallel degree (Ring Attention)
+    enable_async: false                         # Async Ulysses
+    
+    fsdp_config:
+      full_shard: true                          # FULL_SHARD (ZeRO-3) or SHARD_GRAD_OP (ZeRO-2)
+      reshard_after_forward: true               # Free weights after forward pass
+      forward_prefetch: false
+      offload: false                            # Offload to CPU memory
+
+  # -------------------------
+  # Checkpointing
+  # -------------------------
+  checkpoint:
+    output_dir: "./output/pretrain-run-1"       # Where to save DCP and HF checkpoints
+    manager: "dcp"                              # Distributed Checkpoint manager
+    save_async: true                            # Async checkpoint saving
+    save_steps: 1000                            # Save a checkpoint every 1000 steps
+    save_hf_weights: true                       # Convert and save as HF safetensors alongside DCP
+    load_path: null                             # Set to "auto" to resume from the latest checkpoint
+    
+  wandb:
+    enable: false                               # Set true to sync with Weights & Biases
+    project: "VeOmni-Pretrain"
+    name: "run-shuffle-packing"

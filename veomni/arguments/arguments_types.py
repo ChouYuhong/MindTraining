@@ -825,7 +825,11 @@ class VeOmniArguments:
                 logger.info_rank0(f"set pad_to_length = micro_batch_size * max_seq_len = {self.train.pad_to_length}")
 
     def compute_train_steps(self, dataset_length: Optional[int] = None):
-        if self.train.dyn_bsz:
+        if self.train.max_steps is not None:
+            self._train_steps = self.train.max_steps
+            logger.info_rank0(f"Using explicitly provided max_steps: {self.train.max_steps} as total train_steps.")
+        
+        elif self.train.dyn_bsz:
             assert self.data.max_seq_len is not None and self.data.train_size is not None, (
                 "data.max_seq_len and data.train_size are required."
             )
