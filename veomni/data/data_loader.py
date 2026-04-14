@@ -71,7 +71,7 @@ def build_native_dataloader(
     bsz_warmup_ratio: float = 0.02,
     bsz_warmup_init_mbtoken: int = 200,
     dyn_bsz: bool = True,
-    dyn_bsz_runtime: Literal["main", "worker"] = "main",
+    dyn_bsz_runtime: Literal["main", "worker", "worker_exact"] = "worker_exact",
     dyn_bsz_dataset_save_by_idx: bool = False,  # Whether to save dynamic-batching buffers by index for worker-side checkpoint/resume.
     dyn_bsz_buffer_size: int = 200,
     num_workers: int = 8,
@@ -141,6 +141,8 @@ def build_native_dataloader(
 
     if collate_fn is None:
         if build_collate_fn:
+            if dyn_bsz and dyn_bsz_runtime == "worker_exact":
+                collate_fn_kwargs["data_collate_info"] = {"_use_exact_stacking": True}
             collate_fn = MainCollator(**collate_fn_kwargs)
         else:
             collate_fn = NoopDataCollator()
@@ -173,6 +175,18 @@ def build_native_dataloader(
             )
 
             collate_fn = UnpackDataCollator()
+        elif dyn_bsz_runtime == "worker_exact":
+            from .dataset import ShufflePackingDataset
+            dataset = ShufflePackingDataset(
+                dataset=dataset,
+                max_seq_len=max_seq_len,
+                micro_batch_size=micro_batch_size,
+                buffer_size=dyn_bsz_buffer_size,
+                collate_fn=dyn_bsz_collate_fn,
+                seed=getattr(args.train, "seed", 42) if hasattr(args, "train") else 42,
+                get_length_fn=get_length_by_attention_mask_fn,
+            )
+            collate_fn = NoopDataCollator()
         else:
             dataset = DynamicBatchingSizeDataset(
                 dataset=dataset,

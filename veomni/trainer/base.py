@@ -364,6 +364,8 @@ class BaseTrainer(Stateful, ABC):
             lr_decay_style=args.train.optimizer.lr_decay_style,
             lr_decay_ratio=args.train.optimizer.lr_decay_ratio,
             lr_warmup_ratio=args.train.optimizer.lr_warmup_ratio,
+            lr_warmup_steps=args.train.optimizer.lr_warmup_steps,
+            lr_stable_steps=args.train.optimizer.lr_stable_steps,
             lr_start=args.train.optimizer.lr_start,
         )
 

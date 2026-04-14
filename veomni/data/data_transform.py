@@ -71,7 +71,10 @@ def process_plaintext_example(
     else:
         raise ValueError(f"text_keys must be a string or a list of strings, but got {type(text_keys)}")
 
-    tokens = tokenizer.encode(text_example, add_special_tokens=False) + [tokenizer.eos_token_id]
+    tokens = tokenizer.encode(text_example, add_special_tokens=False)
+    if tokenizer.bos_token_id is not None:
+        tokens = [tokenizer.bos_token_id] + tokens
+    tokens = tokens + [tokenizer.eos_token_id]
     for input_ids in split_into_chunks(tokens, max_seq_len):
         examples.append(
             {

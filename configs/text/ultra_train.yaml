@@ -1,0 +1,95 @@
+# =========================================================================
+# VeOmni Text Pre-training Configuration
+# =========================================================================
+
+model:
+  model_path: null                                 # Set to null for random initialization (train from scratch)
+  config_path: "/path/to/your/config_dir"          # Directory containing config.json for building network structure
+  tokenizer_path: "/path/to/your/tokenizer_dir"    # Directory containing tokenizer files. Can be null if same as config_path
+  foundation: {}                                   # (Optional) Override foundation model parameters in config.json
+  basic_modules: []                                # (Optional) Extra modules to shard in FSDP beyond default Transformer layers
+  ops_implementation:
+    attn_implementation: "flash_attention_2"       # Attention mechanism (flash_attention_2/3/4)
+    moe_implementation: null                       # MoE kernel: null (Dense), "fused" (Triton), or "fused_quack" (CUTLASS, SM90+)
+
+data:
+  train_path: "/path/to/your/dataset_config.yaml"  # Path to YAML config defining multiple sources and weights
+  data_type: "plaintext"                           # Use plaintext format for pre-training
+  text_keys: "text"                                # JSON key containing text content (default: content_split)
+  max_seq_len: 8192                                # Context window length for pre-training
+  train_size: 300000000000                         # Total tokens (e.g., 300B) for train steps and LR decay
+  
+  multisource_datasets_type: "veomni_weighted_multisource"          # Enable WeightedMultiSourceDataset
+  datasets_type: "iterable"                        # Use IterableDataset for individual sources
+  
+  dataloader:
+    num_workers: 4                                 # Dataloader workers per process
+    prefetch_factor: 2
+
+train:
+  seed: 42
+  max_steps: 50_000
+  micro_batch_size: 1                        # 每卡 micro batch size (在 Packing 模式下，1 代表每卡拼满 1 个 max_seq_len)
+  global_batch_size: 1024                    # 全局 Batch Size (单位为 packing 后的长序列数，若为 null 框架会自动推导)
+  # --- 核心训练策略与动态 Batching ---
+  train_architecture: "full"                 # 全参训练
+  
+  # 动态 Batching (Sequence Packing) 核心控制区
+  dyn_bsz: true                              # 开启无填充序列拼接，极大提升 GPU 利用率
+  dyn_bsz_runtime: "worker_exact"                    # "main" 在主进程做 packing (推荐)，"worker" 在 dataloader worker 中做
+  pad_to_length: false                       # Packing 后是否仍要 Pad 到 max_seq_len (预训练设为 false 即可)
+  bsz_warmup_ratio: 0.0                      # 是否让全局 batch size 随训练慢慢增大 (一般设为 0)
+  bsz_warmup_init_mbtoken: 200               # 如果启用了 bsz_warmup，初始的 token 数量限制
+  
+  # --- 内存与初始化优化 ---
+  init_device: "meta"                        # 【重要】FSDP2 推荐使用 meta 初始化，避免 CPU/GPU 内存峰值 (OOM)
+  broadcast_model_weights_from_rank0: true   # 避免所有卡同时读盘
+  
+  # --- 优化器与学习率 (预训练标准配置) ---
+  optimizer:
+    type: "adamw"                            # 优化器类型，可选 "adamw", "anyprecision_adamw" 等
+    lr: 3.0e-4                               # 峰值学习率 (如 7B 模型通常在 1e-4 到 3e-4 之间)
+    lr_min: 3.0e-5                           # 最小学习率 (通常为峰值的 1/10)
+    lr_start: 0.0                            # Warmup 的起始学习率，预训练通常从 0 开始
+    lr_warmup_steps: 1000                    # 显式指定绝对的 Warmup 步数 (若设置此项将覆盖 lr_warmup_ratio)
+    lr_decay_style: "cosine"                 # 退火策略: "cosine", "linear", 或 "constant"
+    lr_decay_ratio: 1.0                      # 退火周期占总步数的比例，1.0 表示衰减直到训练结束
+    weight_decay: 0.1                        # L2 正则化强度
+    no_decay_modules: ["RMSNorm", "LayerNorm"] # 不参与 weight_decay 的模块 (防止破坏归一化层)
+    no_decay_params: ["bias"]                # 不参与 weight_decay 的参数名
+    max_grad_norm: 1.0                       # 梯度裁剪阈值，防止梯度爆炸
+
+  # --- 激活重计算 ---
+  gradient_checkpointing:
+    enable: true                             # 开启 Gradient Checkpointing 节省显存
+
+  # --- 分布式并行 (FSDP2) ---
+  accelerator:
+    dp_replicate_size: 1
+    dp_shard_size: 8
+    tp_size: 1
+    ep_size: 1
+    pp_size: 1
+    ulysses_size: 1
+    cp_size: 1
+    fsdp_config:
+      fsdp_mode: "fsdp2"                     # 【推荐】PyTorch 2.4+ 的 FSDP2，显存管理更优
+      full_shard: true                       # 相当于 ZeRO-3，完全切分参数、梯度和优化器状态
+      mixed_precision:
+        enable: true
+        param_dtype: "bfloat16"              # 预训练推荐使用 bf16
+        reduce_dtype: "float32"
+
+  # --- Checkpoint 保存 ---
+  checkpoint:
+    output_dir: "./output/text_pretrain_ckpt"
+    manager: "dcp"                           # 分布式 Checkpoint，保存和恢复速度极快
+    save_steps: 10000                        # 每 10000 步保存一次
+    save_hf_weights: false                   # 自动在 Checkpoint 目录中导出一份标准的 HuggingFace 格式权重
+
+  # --- Weights & Biases 监控 ---
+  wandb:
+    enable: true                             # 是否开启 wandb
+    project: "VeOmni-Pretrain"               # wandb 项目名称
+    name: "run-1"                            # 本次实验的运行名称
+    id: null                                 # 断点续训时可以填入上一次的 run id，保持在同一个页面曲线

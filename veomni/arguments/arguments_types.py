@@ -66,6 +66,14 @@ class OptimizerConfig:
         default=0,
         metadata={"help": "Ratio of learning rate warmup steps."},
     )
+    lr_warmup_steps: Optional[int] = field(
+        default=None,
+        metadata={"help": "Absolute number of warmup steps. If set, this overrides lr_warmup_ratio."},
+    )
+    lr_stable_steps: int = field(
+        default=0,
+        metadata={"help": "Number of stable steps for WSD scheduler. Default to 0."},
+    )
     lr_decay_style: str = field(
         default="constant",
         metadata={"help": "Name of the learning rate scheduler."},
@@ -445,7 +453,7 @@ class TrainingArguments:
         metadata={"help": "Number of steps between two evaluations. 0 to disable."},
     )
     eval_epochs: int = field(
-        default=1,
+        default=0,
         metadata={"help": "Number of epochs between two evaluations. 0 to disable."},
     )
     seed: int = field(
@@ -912,9 +920,13 @@ class VeOmniArguments:
                 logger.info_rank0(f"set pad_to_length = micro_batch_size * max_seq_len = {self.train.pad_to_length}")
 
     def compute_train_steps(self, dataset_length: Optional[int] = None):
+        if self.train.max_steps is not None and self.train.max_steps > 0:
+            self._train_steps = self.train.max_steps
+            return
+
         if self.train.dyn_bsz:
             assert self.data.max_seq_len is not None and self.data.train_size is not None, (
-                "data.max_seq_len and data.train_size are required."
+                "data.max_seq_len and data.train_size are required when train.max_steps is not set."
             )
             train_size = int(self.data.train_size * (1 + self.train.bsz_warmup_ratio / 2))
             self._train_steps = math.ceil(train_size / (self.train.global_batch_size * self.data.max_seq_len))
@@ -926,10 +938,9 @@ class VeOmniArguments:
 
     @property
     def train_steps(self) -> int:
-        if self.train.max_steps is not None and self._train_steps >= self.train.max_steps:
-            logger.warning_once(f"Set train_steps to {self.train.max_steps}. It should be for debug purpose only.")
+        if self.train.max_steps is not None and self.train.max_steps > 0:
             return self.train.max_steps
-
+            
         if self._train_steps == -1:
             raise ValueError("Please run `compute_train_steps` first!")
 

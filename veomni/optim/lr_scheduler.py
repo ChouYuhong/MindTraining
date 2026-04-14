@@ -59,9 +59,11 @@ def build_lr_scheduler(
     optimizer: "Optimizer",
     train_steps: int,
     lr: float = 1e-3,
-    lr_decay_style: Literal["constant", "linear", "cosine"] = "constant",
+    lr_decay_style: Literal["constant", "linear", "cosine", "wsd"] = "constant",
     lr_decay_ratio: float = 1.0,
     lr_warmup_ratio: float = 0.0,
+    lr_warmup_steps: Optional[int] = None,
+    lr_stable_steps: int = 0,
     lr_min: float = 1e-7,
     lr_start: float = 0.0,
 ):
@@ -76,12 +78,27 @@ def build_lr_scheduler(
                 lr_decay_style=lr_decay_style,
                 lr_decay_ratio=lr_decay_ratio,
                 lr_warmup_ratio=lr_warmup_ratio,
+                lr_warmup_steps=lr_warmup_steps,
+                lr_stable_steps=lr_stable_steps,
                 lr_min=lr_min,
                 lr_start=lr_start,
             )
         return MultiLRScheduler(schedulers)
 
-    lr_warmup_steps = int(train_steps * lr_warmup_ratio)
+    if lr_warmup_steps is None:
+        lr_warmup_steps = int(train_steps * lr_warmup_ratio)
+        
+    if lr_decay_style == "wsd":
+        return get_wsd_schedule_with_warmup(
+            optimizer=optimizer,
+            num_warmup_steps=lr_warmup_steps,
+            num_stable_steps=lr_stable_steps,
+            num_training_steps=train_steps,
+            init_lr=lr,
+            min_lr=lr_min,
+            lr_start=lr_start,
+        )
+
     if lr_decay_style == "constant":
         return get_constant_schedule_with_warmup(
             optimizer=optimizer,
@@ -157,6 +174,44 @@ def get_linear_schedule_with_warmup(
             min_lr_ratio,
             float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)),
         )
+
+    return LambdaLR(optimizer, _lr_lambda, last_epoch)
+
+
+def get_wsd_schedule_with_warmup(
+    optimizer: "Optimizer",
+    num_warmup_steps: int,
+    num_stable_steps: int,
+    num_training_steps: int,
+    init_lr: float,
+    last_epoch: int = -1,
+    min_lr: float = 1e-7,
+    lr_start: float = 0.0,
+):
+    """
+    Creates a WSD (Warmup-Stable-Decay) schedule:
+    1. Linear warmup from lr_start to init_lr over num_warmup_steps.
+    2. Stable at init_lr for num_stable_steps.
+    3. Linear decay from init_lr to min_lr over the remaining steps.
+    """
+
+    def _lr_lambda(current_step: int):
+        # 1. Warmup phase
+        if current_step < num_warmup_steps:
+            return (lr_start + (init_lr - lr_start) * current_step / max(1, num_warmup_steps)) / init_lr
+
+        # 2. Stable phase
+        if current_step < num_warmup_steps + num_stable_steps:
+            return 1.0
+
+        # 3. Decay phase
+        min_lr_ratio = min_lr / init_lr
+        decay_steps = max(1, num_training_steps - num_warmup_steps - num_stable_steps)
+        steps_in_decay = current_step - num_warmup_steps - num_stable_steps
+        
+        # Linear decay from 1.0 to min_lr_ratio
+        decay_ratio = steps_in_decay / decay_steps
+        return max(min_lr_ratio, 1.0 - (1.0 - min_lr_ratio) * decay_ratio)
 
     return LambdaLR(optimizer, _lr_lambda, last_epoch)
 

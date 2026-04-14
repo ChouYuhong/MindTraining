@@ -1,0 +1,13 @@
+# dataset_config.yaml (这就是传给 train_path 的那个文件)
+
+sources:
+  - "/data/pretrain/my_custom_corpus_dir/"
+  - "/data/pretrain/math_data/"
+names:
+  - "custom_corpus"
+  - "math"
+schedule:
+  - schedule_type: "const"
+    weights: [0.8, 0.2]
+stopping_strategy: "never_exhausted"
+level: "token"

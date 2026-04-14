@@ -177,6 +177,31 @@ class PrecomputePositionIDsCollator(DataCollator):
 
 
 @dataclass
+class ExactPackingCollator(DataCollator):
+    """
+    Data collator for worker_exact mode. 
+    It expects a list of dicts where each dict contains tensors of exact length `max_seq_len`.
+    It stacks them along dim=0 to produce shape [BSZ, max_seq_len].
+    """
+    def __call__(self, features: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+        batch = {}
+        first_feature = features[0]
+        
+        for key in first_feature.keys():
+            # For 1D tensors (input_ids, labels, attention_mask), stack to [BSZ, SEQ_LEN]
+            if isinstance(first_feature[key], torch.Tensor) and first_feature[key].dim() == 1:
+                batch[key] = torch.stack([f[key] for f in features], dim=0)
+            # For lists, convert to tensor and stack
+            elif isinstance(first_feature[key], list):
+                batch[key] = torch.tensor([f[key] for f in features])
+            # For scalars (ds_idx, etc.), just keep them as lists or convert to tensor
+            else:
+                batch[key] = torch.tensor([f[key] for f in features])
+                
+        return batch
+
+
+@dataclass
 class PackingCollator(DataCollator):
     collate_infos: Dict[str, DataCollateInfo] = field(default_factory=lambda: DEFAULT_DATA_COLLATE_INFO.copy())
     pad_to_length: int = False
@@ -387,14 +412,22 @@ class MainCollator(DataCollator):
         assert self.collate_infos["attention_mask"].sp_pad_value == 1
 
         self.preforward_pipeline.append(PrecomputePositionIDsCollator())
-        self.preforward_pipeline.append(
-            PackingCollator(
-                collate_infos=self.collate_infos,
-                pad_to_length=self.pad_to_length,
-                seq_classification=self.seq_classification,
+        
+        # Determine if we should use exact stacking (for worker_exact) or normal packing
+        if self.data_collate_info.get("_use_exact_stacking", False):
+            self.preforward_pipeline.append(ExactPackingCollator())
+        else:
+            self.preforward_pipeline.append(
+                PackingCollator(
+                    collate_infos=self.collate_infos,
+                    pad_to_length=self.pad_to_length,
+                    seq_classification=self.seq_classification,
+                )
             )
-        )
+            
         if get_parallel_state().sp_enabled:
+            if dyn_bsz_runtime == "worker_exact":
+                raise ValueError("worker_exact mode is not supported with SequenceParallelCollator")
             self.preforward_pipeline.append(
                 SequenceParallelCollator(collate_infos=self.collate_infos, seq_classification=self.seq_classification)
             )
