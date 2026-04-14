@@ -398,6 +398,12 @@ class TrainingArguments:
         default=None,
         metadata={"help": "Max training steps per epoch. (for debug)"},
     )
+    train_steps: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Explicit training steps per epoch. If set, this value takes precedence over data-driven step calculation."
+        },
+    )
     moe_load_balance_monitor_interval: int = field(
         default=0,
         metadata={"help": "Log MoE expert load heatmap every N steps. 0 = disabled. Requires wandb.enable=True."},
@@ -825,6 +831,17 @@ class VeOmniArguments:
                 logger.info_rank0(f"set pad_to_length = micro_batch_size * max_seq_len = {self.train.pad_to_length}")
 
     def compute_train_steps(self, dataset_length: Optional[int] = None):
+        if self.train.train_steps is not None:
+            if self.train.train_steps <= 0:
+                raise ValueError(f"train.train_steps should be > 0, got {self.train.train_steps}.")
+            if self.train.max_steps is not None:
+                logger.warning_once(
+                    "Both train.train_steps and train.max_steps are set. "
+                    "Using train.train_steps and ignoring train.max_steps."
+                )
+            self._train_steps = self.train.train_steps
+            return
+
         if self.train.dyn_bsz:
             assert self.data.max_seq_len is not None and self.data.train_size is not None, (
                 "data.max_seq_len and data.train_size are required."
@@ -839,6 +856,9 @@ class VeOmniArguments:
 
     @property
     def train_steps(self) -> int:
+        if self.train.train_steps is not None:
+            return self.train.train_steps
+
         if self.train.max_steps is not None and self._train_steps >= self.train.max_steps:
             logger.warning_once(f"Set train_steps to {self.train.max_steps}. It should be for debug purpose only.")
             return self.train.max_steps
